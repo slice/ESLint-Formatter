@@ -7,6 +7,7 @@ import sublime_plugin
 import platform
 import glob
 import os
+from os.path import isfile
 from subprocess import Popen, PIPE
 
 PROJECT_NAME = "ESLint-Formatter"
@@ -69,44 +70,45 @@ class FormatEslintCommand(sublime_plugin.TextCommand):
         return buffer_text
 
     def run_script_on_file(self, data):
-        try:
-            dirname = os.path.dirname(data)
-            node_path = PluginUtils.get_node_path()
-            eslint_path = PluginUtils.get_eslint_path(dirname)
+        dirname = os.path.dirname(data)
+        node_path = PluginUtils.get_node_path()
+        eslint_path = PluginUtils.get_eslint_path(dirname)
 
-            if not eslint_path:
-                sublime.error_message("ESLint could not be found on your path")
-                return
+        if not eslint_path:
+            sublime.error_message("ESLint could not be found on your path")
+            return
 
-            cmd = [node_path, eslint_path, "--fix", data]
+        cmd = [node_path, eslint_path, "--fix", data]
 
-            config_path = PluginUtils.get_pref("config_path")
+        def project_has_file(p):
+            return isfile(os.path.join(PluginUtils.project_path(), p))
 
-            if os.path.isfile(config_path):
-                # If config file path exists, use as is
-                full_config_path = config_path
-            else:
-                # Find config gile relative to project path
-                project_path = PluginUtils.project_path()
-                full_config_path = os.path.join(project_path, config_path)
+        global_config_path = PluginUtils.get_pref("global_config_path")
+        possible_local_configs = [
+            ".eslintrc", ".eslintrc.js", ".eslintrc.json", "package.json"
+        ]
+        full_config_path = None
+        # If local configuration file wasn't found, just use our global path
+        if not any(project_has_file(f) for f in possible_local_configs):
+            print(
+                "Falling back to global configuration, no local configuration located."
+            )
+            full_config_path = global_config_path
+        else:
+            print("Located a local configuration, using that.")
 
-            if os.path.isfile(full_config_path):
-                print("Using configuration from {0}".format(full_config_path))
-                cmd.extend(["--config", full_config_path])
+        if full_config_path is not None and isfile(full_config_path):
+            print("Using configuration: {}".format(full_config_path))
+            cmd.extend(["--config", full_config_path])
 
-            if self.view.file_name():
-                cdir = os.path.dirname(self.view.file_name())
-            else:
-                cdir = "/"
+        if self.view.file_name():
+            cdir = os.path.dirname(self.view.file_name())
+        else:
+            cdir = "/"
 
-            output = PluginUtils.get_output(cmd, cdir, data)
-
-            return output
-
-        except Exception as e:
-            # Something bad happened.
-            print("Unexpected error({}): {}".format(type(e), e))
-            sublime.error_message("Error occurred while formatting with eslint, check console.")
+        print(cmd, cdir, data)
+        output = PluginUtils.get_output(cmd, cdir, data)
+        return output
 
     def refold_folded_regions(self, folded_regions_content, entire_file_contents):
         self.view.unfold(sublime.Region(0, len(entire_file_contents)))
@@ -120,7 +122,6 @@ class FormatEslintCommand(sublime_plugin.TextCommand):
 
 
 class ESLintFormatterEventListeners(sublime_plugin.EventListener):
-
     @staticmethod
     def on_post_save(view):
         if PluginUtils.get_pref("format_on_save"):
@@ -139,6 +140,7 @@ class ESLintFormatterEventListeners(sublime_plugin.EventListener):
 
 
 class PluginUtils:
+
     @staticmethod
     def project_path():
         project_data = sublime.active_window().project_data()
